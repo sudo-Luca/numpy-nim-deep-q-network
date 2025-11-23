@@ -1,5 +1,6 @@
 """main.py
-Train two DQNs and provide a Tkinter UI for human vs ai1 (AI starts) and human vs ai2 (human starts).
+Train two DQNs and provide a Tkinter UI for human vs ai1 (AI starts) and human vs ai2 (Human starts).
+The player who takes the last stick loses (misère Nim).
 """
 import numpy as np
 import tkinter as tk
@@ -27,7 +28,7 @@ def eval_vs_random(agent, env, games=10):
     for _ in range(games):
         state = env.reset()
         done = False
-        turn = 0
+        turn = 0  # agent starts
         while not done:
             if turn == 0:
                 action = select_action(agent, state, env)
@@ -35,7 +36,7 @@ def eval_vs_random(agent, env, games=10):
                 action = np.random.choice(env.valid_actions())
             state, _, done = env.step(action)
             turn ^= 1
-        if turn == 1:
+        if turn == 1:  # agent took last stick → agent loses
             wins += 1
     return wins
 
@@ -185,7 +186,10 @@ class NimGUI:
         self.game_env.step(action)
         self.draw_sticks()
         if self.game_env.stones == 0:
-            messagebox.showinfo('Result', 'AI took the last stick — You lose!' if self.current_mode=='ai1' else 'AI took the last stick — AI loses!')
+            if self.current_mode == 'ai1':
+                messagebox.showinfo('Result', 'AI took the last stick — AI loses!')
+            else:
+                messagebox.showinfo('Result', 'AI took the last stick — You win!')
             return
         self.turn = 0
         self.status.config(text='Your turn')

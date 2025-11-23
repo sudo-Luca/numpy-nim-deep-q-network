@@ -1,8 +1,6 @@
 """main.py
 Train two DQNs and provide a Tkinter UI for human vs ai1 (AI starts) and human vs ai2 (human starts).
-Run: python main.py --hidden1 128,64 --hidden2 64,32 --episodes 10000
 """
-import argparse
 import numpy as np
 import tkinter as tk
 from tkinter import messagebox
@@ -16,31 +14,23 @@ losses_ai2 = None
 
 # helpers
 
-def parse_hidden(s):
-    if not s:
-        return (64,64)
-    parts = [p.strip() for p in s.split(',') if p.strip()]
-    return tuple(int(p) for p in parts)
-
-def select_action(agent, state, env, epsilon):
-    if np.random.rand() < epsilon:
-        return np.random.choice(env.valid_actions())
-    q = agent.predict(state)
-    q = q.copy()
+def select_action(agent, state, env, epsilon=0.0):
+    q = agent.predict(state).copy()
     for a in range(agent.action_size):
         if (a+1) not in env.valid_actions():
             q[a] = -1e9
     return int(np.argmax(q)) + 1
+
 
 def eval_vs_random(agent, env, games=10):
     wins = 0
     for _ in range(games):
         state = env.reset()
         done = False
-        turn = 0  # agent first
+        turn = 0
         while not done:
             if turn == 0:
-                action = select_action(agent, state, env, 0.0)
+                action = select_action(agent, state, env)
             else:
                 action = np.random.choice(env.valid_actions())
             state, _, done = env.step(action)
@@ -48,6 +38,7 @@ def eval_vs_random(agent, env, games=10):
         if turn == 1:
             wins += 1
     return wins
+
 
 def train(ai1, ai2, env, episodes=10000, batch_size=64, lr=1e-3, gamma=0.99):
     global losses_ai1, losses_ai2
@@ -67,25 +58,29 @@ def train(ai1, ai2, env, episodes=10000, batch_size=64, lr=1e-3, gamma=0.99):
 
     losses1, losses2 = [], []
 
-    for ep in range(1, episodes+1):
+    for ep in range(episodes):
         state = env.reset()
         done = False
         turn = 0  # ai1 starts
 
         while not done:
             if turn == 0:
-                action = select_action(ai1, state, env, 0.1)
+                action = select_action(ai1, state, env)
                 next_state, _, done = env.step(action)
-                reward = 1.0 if done else 0.0
-                buffer1.push(state, action-1, reward, next_state, done)
+                reward1 = -1.0 if done else 0.0
+                reward2 = 1.0 if done else 0.0
+                buffer1.push(state, action-1, reward1, next_state, done)
             else:
-                action = select_action(ai2, state, env, 0.1)
+                action = select_action(ai2, state, env)
                 next_state, _, done = env.step(action)
-                reward = 1.0 if done else 0.0
-                buffer2.push(state, action-1, reward, next_state, done)
+                reward2 = -1.0 if done else 0.0
+                reward1 = 1.0 if done else 0.0
+                buffer2.push(state, action-1, reward2, next_state, done)
 
             state = next_state
             turn ^= 1
+        if (ep+1) % 100 == 0:
+            print(f'Episode {ep+1}/{episodes}')
 
         if len(buffer1) >= batch_size:
             s, a, r, ns, d = buffer1.sample(batch_size)
@@ -106,12 +101,11 @@ def train(ai1, ai2, env, episodes=10000, batch_size=64, lr=1e-3, gamma=0.99):
             loss = ai2.update(s, target)
             losses2.append(float(loss))
             target2.soft_update(ai2, tau=0.1)
-        if ep % 100 == 0:
-            print(f'Episode {ep}/{episodes} — Losses: AI1={np.mean(losses1[-100:]):.4f}, AI2={np.mean(losses2[-100:]):.4f}')
 
     losses_ai1 = losses1
     losses_ai2 = losses2
     return losses1, losses2
+
 
 # GUI
 class NimGUI:
@@ -139,7 +133,7 @@ class NimGUI:
         self.status = tk.Label(root, text='')
         self.status.pack(pady=6)
 
-        self.current_mode = None  # 'ai1' or 'ai2'
+        self.current_mode = None
         self.turn = 0
         self.draw_sticks()
 
@@ -147,8 +141,7 @@ class NimGUI:
         self.canvas.delete('all')
         cols = 10
         spacing_x = 34
-        x0 = 20
-        y0 = 20
+        x0, y0 = 20, 20
         for i in range(self.game_env.stones):
             col = i % cols
             row = i // cols
@@ -159,7 +152,7 @@ class NimGUI:
     def start_vs_ai1(self):
         self.game_env.reset()
         self.current_mode = 'ai1'
-        self.turn = 1  # AI starts
+        self.turn = 1
         self.status.config(text='AI1 starts')
         self.draw_sticks()
         self.root.after(300, self.ai_move)
@@ -167,20 +160,17 @@ class NimGUI:
     def start_vs_ai2(self):
         self.game_env.reset()
         self.current_mode = 'ai2'
-        self.turn = 0  # human starts
+        self.turn = 0
         self.status.config(text='You start (vs AI2)')
         self.draw_sticks()
 
     def human_move(self, take):
-        if self.turn != 0:
-            return
-        if take not in self.game_env.valid_actions():
-            self.status.config(text='Invalid move')
+        if self.turn != 0 or take not in self.game_env.valid_actions():
             return
         self.game_env.step(take)
         self.draw_sticks()
         if self.game_env.stones == 0:
-            messagebox.showinfo('Result', 'You took the last stick — You win!')
+            messagebox.showinfo('Result', 'You took the last stick — You lose!')
             return
         self.turn = 1
         self.status.config(text='AI turn')
@@ -191,11 +181,11 @@ class NimGUI:
             return
         agent = self.ai1 if self.current_mode == 'ai1' else self.ai2
         state = self.game_env._get_state()
-        action = select_action(agent, state, self.game_env, epsilon=0.0)
+        action = select_action(agent, state, self.game_env)  # deterministic
         self.game_env.step(action)
         self.draw_sticks()
         if self.game_env.stones == 0:
-            messagebox.showinfo('Result', 'AI took the last stick — AI wins!')
+            messagebox.showinfo('Result', 'AI took the last stick — You lose!' if self.current_mode=='ai1' else 'AI took the last stick — AI loses!')
             return
         self.turn = 0
         self.status.config(text='Your turn')
@@ -203,7 +193,7 @@ class NimGUI:
     def show_losses(self):
         global losses_ai1, losses_ai2
         if losses_ai1 is None or losses_ai2 is None:
-            messagebox.showinfo('Losses', 'No loss data available (train first)')
+            messagebox.showinfo('Losses', 'No loss data available')
             return
         plt.figure()
         plt.plot(losses_ai1, label='ai1')
@@ -212,11 +202,10 @@ class NimGUI:
         plt.title('Training losses')
         plt.show()
 
-# Main
+
 if __name__ == '__main__':
-    # Fixed architectures (edit here)
-    h1 = (64, 128, 128, 128, 128, 128, 64)
-    h2 = (64, 128, 128, 256, 32, 64)
+    h1 = (256, 256, 256, 256, 256)
+    h2 = (256, 256, 256, 256, 256)
 
     env = Nim(starting_stones=15, max_take=3)
     ai1 = DQN(state_size=1, action_size=env.max_take, hidden_sizes=h1, lr=1e-3, gamma=0.99)
@@ -229,7 +218,7 @@ if __name__ == '__main__':
     wins = eval_vs_random(ai1, env, games=10)
     print(f'ai1 won {wins}/10 vs random')
 
-    if wins >= 5:
+    if wins > 6:
         print('ai1 passed threshold — launching GUI')
         root = tk.Tk()
         root.title('Nim: Human vs AI')

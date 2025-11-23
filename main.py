@@ -215,8 +215,8 @@ class NimGUI:
 # Main
 if __name__ == '__main__':
     # Fixed architectures (edit here)
-    h1 = (64, 64, 64, 64, 64, 64, 64)
-    h2 = (64, 128, 128, 64)
+    h1 = (64, 128, 128, 128, 128, 128, 64)
+    h2 = (64, 128, 128, 256, 32, 64)
 
     env = Nim(starting_stones=15, max_take=3)
     ai1 = DQN(state_size=1, action_size=env.max_take, hidden_sizes=h1, lr=1e-3, gamma=0.99)
